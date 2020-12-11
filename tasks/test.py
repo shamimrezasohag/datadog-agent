@@ -294,6 +294,7 @@ def lint_releasenote(ctx):
                 [
                     f['filename'].startswith("releasenotes/notes/")
                     or f['filename'].startswith("releasenotes-dca/notes/")
+                    or f['filename'].startswith("releasenotes-install/notes/")
                     for f in files
                 ]
             ):
@@ -329,6 +330,7 @@ def lint_releasenote(ctx):
                         [
                             f['filename'].startswith("releasenotes/notes/")
                             or f['filename'].startswith("releasenotes-dca/notes/")
+                            or f['filename'].startswith("releasenotes-install/notes/")
                             for f in files
                         ]
                     ):

@@ -63,6 +63,24 @@ def add_dca_prelude(ctx, version, agent7_version, agent6_version=""):
 
 
 @task
+def add_install_prelude(ctx, version):
+    res = ctx.run("reno --rel-notes-dir releasenotes-install new prelude-release-{0}".format(version))
+    new_releasenote = res.stdout.split(' ')[-1].strip()  # get the new releasenote file path
+
+    with open(new_releasenote, "w") as f:
+        f.write(
+            """prelude:
+    |
+    Released on: {0}""".format(
+                date.today()
+            )
+        )
+
+    ctx.run("git add {}".format(new_releasenote))
+    ctx.run("git commit -m \"Add prelude for {} release\"".format(version))
+
+
+@task
 def update_dca_changelog(ctx, new_version, agent_version):
     """
     Quick task to generate the new CHANGELOG-DCA using reno when releasing a minor
@@ -234,6 +252,95 @@ def update_changelog(ctx, new_version):
     ctx.run(
         "git add CHANGELOG.rst \
             && git commit -m \"Update CHANGELOG for {}\"".format(
+            new_version
+        )
+    )
+
+
+@task
+def update_install_changelog(ctx, new_version, prev_version):
+    """
+    Quick task to generate the new CHANGELOG-INSTALL using reno when releasing a minor
+    version (linux/macOS only).
+    """
+    new_version_int = list(map(int, new_version.split(".")))
+
+    if len(new_version_int) != 3:
+        print("Error: invalid version: {}".format(new_version_int))
+        raise Exit(1)
+
+    prev_version_int = list(map(int, prev_version.split(".")))
+
+    if len(prev_version_int) != 3:
+        print("Error: invalid version: {}".format(prev_version_int))
+        raise Exit(1)
+
+    # let's avoid losing uncommitted change with 'git reset --hard'
+    try:
+        ctx.run("git diff --exit-code HEAD", hide="both")
+    except Failure:
+        print("Error: You have uncommitted changes, please commit or stash before using update-install-changelog")
+        return
+
+    # make sure we are up to date
+    ctx.run("git fetch")
+
+    # let's check that the tag for the new version is present (needed by reno)
+    try:
+        ctx.run("git tag --list | grep install-{}".format(new_version))
+    except Failure:
+        print("Missing 'install-{}' git tag: mandatory to use 'reno'".format(new_version))
+        raise
+
+    # we most likely do not have install-*-devel branch, but keep the logic here.
+    branching_point = "install-{}.{}.0-devel".format(new_version_int[0], new_version_int[1])
+    previous_minor_branchoff = "install-{}.{}".format(new_version_int[0], new_version_int[1] - 1)
+    log_result = ctx.run(
+        "git log {}...remotes/origin/master --name-only --oneline | \
+            grep releasenotes-install/notes/ || true".format(
+            branching_point, previous_minor_branchoff
+        )
+    )
+    log_result = log_result.stdout.replace('\n', ' ').strip()
+    if len(log_result) > 0:
+        ctx.run("git rm --ignore-unmatch {}".format(log_result))
+
+    # generate the new changelog
+    ctx.run(
+        "reno report \
+            --ignore-cache \
+            --earliest-version {} \
+            --version {} \
+            --no-show-source > /tmp/new_changelog.rst".format(
+            branching_point, new_version
+        )
+    )
+
+    # reseting git
+    ctx.run("git reset --hard HEAD")
+
+    # mac's `sed` has a different syntax for the "-i" paramter
+    sed_i_arg = "-i"
+    if sys.platform == 'darwin':
+        sed_i_arg = "-i ''"
+    # remove the old header from the existing changelog
+    ctx.run("sed {0} -e '1,4d' CHANGELOG-INSTALL.rst".format(sed_i_arg))
+
+    if sys.platform != 'darwin':
+        # sed on darwin doesn't support `-z`. On mac, you will need to manually update the following.
+        ctx.run(
+            "sed -z {0} -e 's/install-{1}\\n===={2}/{1}\\n{2}/' /tmp/new_changelog-install.rst".format(
+                sed_i_arg, new_version, '=' * len(new_version)
+            )
+        )
+
+    # merging to CHANGELOG-INSTALL.rst
+    ctx.run("cat CHANGELOG-INSTALL.rst >> /tmp/new_changelog-install.rst && mv /tmp/new_changelog-install.rst CHANGELOG-INSTALL.rst")
+
+    # commit new CHANGELOG-INSTALL
+    ctx.run(
+        "git add CHANGELOG-INSTALL.rst \
+            && git commit -m \"[INSTALL] Update CHANGELOG for {}\"".format(
             new_version
         )
     )
