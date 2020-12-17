@@ -302,9 +302,18 @@ func (p *Probe) handleEvent(data []byte) {
 			return
 		}
 
-		log.Tracef("remove dentry cache entry for inode %d", event.InvalidateDentry.Inode)
+		if p.resolvers.MountResolver.IsOverlayFS(event.InvalidateDentry.MountID) {
+			log.Tracef("remove all dentry entries for mount id %d", event.InvalidateDentry.MountID)
+			p.resolvers.DentryResolver.DelCacheEntries(event.InvalidateDentry.MountID)
 
-		p.resolvers.DentryResolver.DelCacheEntry(event.InvalidateDentry.MountID, event.InvalidateDentry.Inode)
+			// bump the mount id revision so that it will invalidate all the discarders for this mount point
+			if err := p.resolvers.MountResolver.BumpRevision(event.InvalidateDentry.MountID); err != nil {
+				log.Errorf("failed to invalidate discarders for mount id %d", event.InvalidateDentry.MountID)
+			}
+		} else {
+			log.Tracef("remove dentry cache entry for inode %d", event.InvalidateDentry.Inode)
+			p.resolvers.DentryResolver.DelCacheEntry(event.InvalidateDentry.MountID, event.InvalidateDentry.Inode)
+		}
 
 		// If a temporary file is created and deleted in a row a discarder can be added
 		// after the in-kernel discarder cleanup and thus a discarder will be pushed for a deleted file.
@@ -364,11 +373,20 @@ func (p *Probe) handleEvent(data []byte) {
 			return
 		}
 
+		// defer it do ensure that it will be done after the dispatch that could re-add it
 		defer func() {
-			log.Tracef("remove dentry cache entry for inode %d", event.Rmdir.Inode)
+			if p.resolvers.MountResolver.IsOverlayFS(event.Rmdir.MountID) {
+				log.Tracef("remove all dentry entries for mount id %d", event.Rmdir.MountID)
+				p.resolvers.DentryResolver.DelCacheEntries(event.Rmdir.MountID)
 
-			// defer it do ensure that it will be done after the dispatch that could re-add it
-			p.resolvers.DentryResolver.DelCacheEntry(event.Rmdir.MountID, event.Rmdir.Inode)
+				// bump the mount id revision so that it will invalidate all the discarders for this mount point
+				if err := p.resolvers.MountResolver.BumpRevision(event.Rmdir.MountID); err != nil {
+					log.Errorf("failed to invalidate discarders for mount id %d", event.Rmdir.MountID)
+				}
+			} else {
+				log.Tracef("remove dentry cache entry for inode %d", event.Rmdir.Inode)
+				p.resolvers.DentryResolver.DelCacheEntry(event.Rmdir.MountID, event.Rmdir.Inode)
+			}
 		}()
 	case FileUnlinkEventType:
 		if _, err := event.Unlink.UnmarshalBinary(data[offset:]); err != nil {
@@ -376,11 +394,20 @@ func (p *Probe) handleEvent(data []byte) {
 			return
 		}
 
+		// defer it do ensure that it will be done after the dispatch that could re-add it
 		defer func() {
-			log.Tracef("remove dentry cache entry for inode %d", event.Unlink.Inode)
+			if p.resolvers.MountResolver.IsOverlayFS(event.Unlink.MountID) {
+				log.Tracef("remove all dentry entries for mount id %d", event.Unlink.MountID)
+				p.resolvers.DentryResolver.DelCacheEntries(event.Unlink.MountID)
 
-			// defer it do ensure that it will be done after the dispatch that could re-add it
-			p.resolvers.DentryResolver.DelCacheEntry(event.Unlink.MountID, event.Unlink.Inode)
+				// bump the mount id revision so that it will invalidate all the discarders for this mount point
+				if err := p.resolvers.MountResolver.BumpRevision(event.Unlink.MountID); err != nil {
+					log.Errorf("failed to invalidate discarders for mount id %d", event.Unlink.MountID)
+				}
+			} else {
+				log.Tracef("remove dentry cache entry for inode %d", event.Unlink.Inode)
+				p.resolvers.DentryResolver.DelCacheEntry(event.Unlink.MountID, event.Unlink.Inode)
+			}
 		}()
 	case FileRenameEventType:
 		if _, err := event.Rename.UnmarshalBinary(data[offset:]); err != nil {
@@ -389,11 +416,21 @@ func (p *Probe) handleEvent(data []byte) {
 		}
 
 		defer func() {
-			log.Tracef("remove dentry cache entry for inode %d", event.Rename.New.Inode)
+			if p.resolvers.MountResolver.IsOverlayFS(event.Rename.New.MountID) {
+				log.Tracef("remove all dentry entries for mount id %d", event.Rename.New.MountID)
+				p.resolvers.DentryResolver.DelCacheEntries(event.Rename.New.MountID)
 
-			// use the new.inode as the old one is a fake one generated from the probe. See RenameEvent.MarshalJSON
-			// defer it do ensure that it will be done after the dispatch that could re-add it
-			p.resolvers.DentryResolver.DelCacheEntry(event.Rename.New.MountID, event.Rename.New.Inode)
+				// bump the mount id revision so that it will invalidate all the discarders for this mount point
+				if err := p.resolvers.MountResolver.BumpRevision(event.Rename.New.MountID); err != nil {
+					log.Errorf("failed to invalidate discarders for mount id %d", event.Rename.New.MountID)
+				}
+			} else {
+				log.Tracef("remove dentry cache entry for inode %d", event.Rename.New.Inode)
+
+				// use the new.inode as the old one is a fake one generated from the probe. See RenameEvent.MarshalJSON
+				// defer it do ensure that it will be done after the dispatch that could re-add it
+				p.resolvers.DentryResolver.DelCacheEntry(event.Rename.New.MountID, event.Rename.New.Inode)
+			}
 		}()
 	case FileChmodEventType:
 		if _, err := event.Chmod.UnmarshalBinary(data[offset:]); err != nil {

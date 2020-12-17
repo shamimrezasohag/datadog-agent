@@ -70,6 +70,10 @@ func (r *Resolvers) Start() error {
 		return err
 	}
 
+	if err := r.MountResolver.Start(); err != nil {
+		return err
+	}
+
 	return r.DentryResolver.Start()
 }
 

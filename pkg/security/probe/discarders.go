@@ -48,7 +48,8 @@ func (p *Probe) discardPIDWithTimeout(eventType EventType, pid uint32, timeout t
 }
 
 type inodeDiscarder struct {
-	PathKey PathKey
+	PathKey  PathKey
+	Revision uint64
 }
 
 type inodeDiscarderParameters struct {
@@ -72,6 +73,7 @@ func (p *Probe) discardInode(eventType EventType, mountID uint32, inode uint64) 
 			MountID: mountID,
 			Inode:   inode,
 		},
+		Revision: p.resolvers.MountResolver.GetRevision(mountID),
 	}
 
 	updateFlags := libebpf.UpdateExist

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	lib "github.com/DataDog/ebpf"
 	"github.com/cobaugh/osrelease"
 	"github.com/moby/sys/mountinfo"
 	"github.com/pkg/errors"
@@ -25,6 +26,10 @@ import (
 var (
 	// ErrMountNotFound is used when an unknown mount identifier is found
 	ErrMountNotFound = errors.New("unknown mount ID")
+)
+
+const (
+	revisionsArraySize = 4096
 )
 
 // newMountEventFromMountInfo - Creates a new MountEvent from parsed MountInfo data
@@ -67,10 +72,12 @@ func (m *MountEvent) IsOverlayFS() bool {
 
 // MountResolver represents a cache for mountpoints and the corresponding file systems
 type MountResolver struct {
-	probe   *Probe
-	lock    sync.RWMutex
-	mounts  map[uint32]*MountEvent
-	devices map[uint32]map[uint32]*MountEvent
+	probe        *Probe
+	lock         sync.RWMutex
+	mounts       map[uint32]*MountEvent
+	devices      map[uint32]map[uint32]*MountEvent
+	revisions    [revisionsArraySize]uint64
+	revisionsMap *lib.Map
 }
 
 // SyncCache - Snapshots the current mount points of the system by reading through /proc/[pid]/mountinfo.
@@ -146,6 +153,33 @@ func (mr *MountResolver) Delete(mountID uint32) error {
 	mr.delete(mount)
 
 	return nil
+}
+
+// BumpRevision bumps the mount revision
+func (mr *MountResolver) BumpRevision(mountID uint32) error {
+	key := mountID % revisionsArraySize
+	mr.revisions[key]++
+
+	return mr.revisionsMap.Put(key, mr.revisions[key])
+}
+
+// GetRevision returns the current revision
+func (mr *MountResolver) GetRevision(mountID uint32) uint64 {
+	key := mountID % revisionsArraySize
+	return mr.revisions[key]
+}
+
+// IsOverlayFS returns the type of a mountID
+func (mr *MountResolver) IsOverlayFS(mountID uint32) bool {
+	mr.lock.RLock()
+	defer mr.lock.RUnlock()
+
+	mount, exists := mr.mounts[mountID]
+	if !exists {
+		return false
+	}
+
+	return mount.IsOverlayFS()
 }
 
 // Insert a new mount point in the cache
@@ -267,6 +301,20 @@ func getMountIDOffset(probe *Probe) uint64 {
 	}
 
 	return offset
+}
+
+// Start the resolver
+func (mr *MountResolver) Start() error {
+	revisions, ok, err := mr.probe.manager.GetMap("mount_id_revisions")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("map mount_id_revisions not found")
+	}
+	mr.revisionsMap = revisions
+
+	return nil
 }
 
 // NewMountResolver instantiates a new mount resolver

@@ -38,6 +38,7 @@ struct bpf_map_def SEC("maps/filter_policy") filter_policy = {
 
 struct inode_discarder_t {
     struct path_key_t path_key;
+    u64 revision;
 };
 
 struct bpf_map_def SEC("maps/inode_discarders") inode_discarders = { \
@@ -49,12 +50,27 @@ struct bpf_map_def SEC("maps/inode_discarders") inode_discarders = { \
     .namespace = "",
 };
 
+#define REVISION_ARRAY_SIZE 4096
+
+struct bpf_map_def SEC("maps/mount_id_revisions") mount_id_revisions = { \
+    .type = BPF_MAP_TYPE_ARRAY,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(u64),
+    .max_entries = REVISION_ARRAY_SIZE,
+    .pinning = 0,
+    .namespace = "",
+};
+
 int __attribute__((always_inline)) discarded_by_inode(u64 event_type, u32 mount_id, u64 inode) {
+    u64 i = mount_id % REVISION_ARRAY_SIZE;
+    u64 *revision =  bpf_map_lookup_elem(&mount_id_revisions, &i);
+
     struct inode_discarder_t key = {
         .path_key = {
             .ino = inode,
             .mount_id = mount_id,
-        }
+        },
+        .revision = revision ? *revision : 0,
     };
 
     struct filter_t *filter = bpf_map_lookup_elem(&inode_discarders, &key);
@@ -69,11 +85,15 @@ int __attribute__((always_inline)) discarded_by_inode(u64 event_type, u32 mount_
 }
 
 void __attribute__((always_inline)) remove_inode_discarder(u32 mount_id, u64 inode) {
+    u64 i = mount_id % REVISION_ARRAY_SIZE;
+    u64 *revision =  bpf_map_lookup_elem(&mount_id_revisions, &i);
+
     struct inode_discarder_t key = {
         .path_key = {
             .ino = inode,
             .mount_id = mount_id,
-        }
+        },
+        .revision = revision ? *revision : 0,
     };
 
     bpf_map_delete_elem(&inode_discarders, &key);
